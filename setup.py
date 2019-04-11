@@ -30,15 +30,17 @@ setup(
     author_email='tech-support@fulfil.io',
     url='https://github.com/fulfilio/jet-python',
     packages=[
-        'jet-python',
+        'jet',
     ],
-    package_dir={'jet-python': 'jet-python'},
+    package_dir={'jet': 'jet'},
     include_package_data=True,
     install_requires=[
+        'python-dateutil',
+        'requests',
     ],
     license='MIT',
     zip_safe=False,
-    keywords='jet-python',
+    keywords='jet jet.com python',
     classifiers=[
         'Development Status :: 2 - Pre-Alpha',
         'Intended Audience :: Developers',
