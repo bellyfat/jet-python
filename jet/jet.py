@@ -1,6 +1,22 @@
 # -*- coding: utf-8 -*-
+from datetime import datetime, time
 import requests
+import pytz
 from dateutil.parser import parse as parse_date
+
+
+UTC = pytz.timezone('UTC')
+
+
+def isoformat(d):
+    "Convert a date to datetime ISO format used by jet"
+    datetime.combine(d, time(0, 0)).replace(
+        tzinfo=UTC
+    ).isoformat()
+    current_time = datetime.utcnow().time()
+    return datetime.combine(d, current_time).replace(tzinfo=UTC).strftime(
+        '%Y-%m-%dT%H:%M:%S.0000000-00:00'
+    )
 
 
 class Jet(object):
@@ -35,6 +51,16 @@ class Jet(object):
             self.token
         )
 
+    def send_request(self, method, url, **kwargs):
+        caller = getattr(self.session, method)
+        response = caller(self.base_url + url, **kwargs)
+        # TODO: logging debug the body and response content
+        response.raise_for_status()
+        try:
+            return response.json()
+        except ValueError:
+            return True
+
     @property
     def products(self):
         return Product(self)
@@ -42,6 +68,10 @@ class Jet(object):
     @property
     def orders(self):
         return Order(self)
+
+    @property
+    def returns(self):
+        return Return(self)
 
 
 class Product(object):
@@ -66,55 +96,91 @@ class Product(object):
 
         https://developer.jet.com/docs/merchant-sku-price
         """
-        return self.client.session.post(
-            self.client.base_url + '/merchant-skus/' + sku,
+        return self.client.send_request(
+            'put',
+            '/merchant-skus/' + sku + '/price',
             json={'price': price}
-        ).json()
+        )
 
     def get_sku(self, sku):
         """
         Retrieve information about SKUs
         """
-        return self.client.session.get(
-            self.client.base_url + '/merchant-skus/' + sku,
-        ).json()
+        return self.client.send_request(
+            'get',
+            '/merchant-skus/' + sku,
+        )
 
     def get_price(self, sku):
         """
         Retrieve price information of SKU
         """
-        return self.client.session.get(
-            self.client.base_url + '/merchant-skus/' + sku + '/price',
-        ).json()
+        return self.client.send_request(
+            'get',
+            '/merchant-skus/' + sku + '/price',
+        )
 
     def get_inventory(self, sku):
         """
         Retrieve inventory information of SKU
         """
-        return self.client.session.get(
-            self.client.base_url + '/merchant-skus/' + sku + '/inventory',
-        ).json()
+        return self.client.send_request(
+            'get',
+            '/merchant-skus/' + sku + '/inventory',
+        )
 
     def get_skus(self, page=1, per_page=10):
         """
         Retrieve multiple SKUs at once
         """
-        urls = self.client.session.get(
-            self.client.base_url + '/merchant-skus',
+        urls = self.client.send_request(
+            'get',
+            '/merchant-skus',
             params={
                 "offset": (page - 1) * per_page,
                 "limit": per_page,
             }
-        ).json()['sku_urls']
+        )['sku_urls']
         return [
             self.get_sku(url.rsplit('/')[-1])
             for url in urls
         ]
 
+    def create(self, sku, data):
+        """
+        Create a new product
+        """
+        return self.client.send_request(
+            'put',
+            '/merchant-skus/' + sku,
+            json=data
+        )
+
+    def update_inventory(self, sku, data):
+        """
+        Update inventory for products.
+
+        Data should be a dictionary with the fuflillment_node_id
+        as the key and inventory quantity as the value
+        """
+        return self.client.send_request(
+            'patch',
+            '/merchant-skus/' + sku + '/inventory',
+            json={
+                'fulfillment_nodes': [
+                    {
+                        'fulfillment_node_id': node_id,
+                        'quantity': quantity,
+                    }
+                    for node_id, quantity in data.items()
+                ]
+            }
+        )
+
 
 class Order(object):
     """
-
+    Order Management
     """
 
     def __init__(self, client):
@@ -147,24 +213,26 @@ class Order(object):
         if fulfillment_node:
             params['fulfillment_node'] = fulfillment_node
 
-        order_urls = self.client.session.get(
-            self.client.base_url + '/orders/%s' % status,
+        order_urls = self.client.send_request(
+            'get',
+            '/orders/%s' % status,
             params=params
-        ).json()['order_urls']
+        )['order_urls']
         return [
             url.rsplit('/')[-1] for url in order_urls
         ]
 
-    def get_order(self, order_id):
+    def get(self, order_id):
         """
         Retreive an order with the given ID
         """
-        return self.client.session.get(
-            self.client.base_url + '/orders/withoutShipmentDetail/%s' % order_id,
-        ).json()
+        return self.client.send_request(
+            'get',
+            '/orders/withoutShipmentDetail/%s' % order_id,
+        )
 
-    def acknowledge(self, order_id, status='accepted',
-                    alt_order_id=None, order_items=None):
+    def acknowledge(self, order_id, order_items, status='accepted',
+                    alt_order_id=None):
         """
         The order acknowledge call is utilized to allow a retailer to accept or
         reject an order. If there are any skus in the order that cannot be
@@ -181,19 +249,27 @@ class Order(object):
         * accepted
 
         :param alt_order_id: Option merchant supplied order ID.
-        :param order_items: See https://developer.jet.com/docs/acknowledge-order
+        :param order_items: A dictionary with order_item_id as the key
+                            and the status as value.
+
+                            {
+                                'a35bd1f8a8ab4481a0cccda6e2012e13': 'fulfillable'
+                            }
         """
         body = {
             'acknowledgement_status': status,
+            'order_items': [{
+                'order_item_acknowledgement_status': item_status,
+                'order_item_id': item_id,
+            } for item_id, item_status in order_items.items()]
         }
         if alt_order_id is not None:
             body['alt_order_id'] = alt_order_id
-        if order_items is not None:
-            body['order_items'] = order_items
-        return self.client.session.put(
-            self.client.base_url + '/orders/%s/acknowledge' % order_id,
+        return self.client.send_request(
+            'put',
+            '/orders/%s/acknowledge' % order_id,
             json=body
-        ).json()
+        )
 
     def ship(self, order_id, shipments):
         """
@@ -207,10 +283,52 @@ class Order(object):
                 body['shipments'].append(shipment.to_dict())
             else:
                 body['shipments'].append(shipment)
-        return self.client.session.put(
-            self.client.base_url + '/orders/%s/ship' % order_id,
+        return self.client.send_request(
+            'put',
+            '/orders/%s/shipped' % order_id,
             json=body
-        ).json()
+        )
+
+
+class Return(object):
+    """
+    Returns Management
+    """
+
+    def __init__(self, client):
+        self.client = client
+
+    def get_return_ids(self, status):
+        return self.client.send_request(
+            'get',
+            '/returns/%s' % status,
+        )
+
+    def get(self, return_id):
+        """
+        Retreive an return with the given ID
+        """
+        return self.client.send_request(
+            'get',
+            '/returns/state/%s' % return_id,
+        )
+
+    def complete(self, return_id, order_id,
+                 items, agree_to_return_charge,
+                 alt_order_id=None,
+                 return_charge_feedback=None):
+        body = {
+            'merchant_order_id': order_id,
+            'items': items,
+            'agree_to_return_charge': agree_to_return_charge,
+        }
+        if alt_order_id:
+            body['alt_order_id'] = alt_order_id
+        return self.client.send_request(
+            'put',
+            '/returns/%s/complete' % return_id,
+            json=body
+        )
 
 
 class Shipment(object):
@@ -223,8 +341,9 @@ class Shipment(object):
     https://developer.jet.com/docs/ship-order
     """
 
-    def __init__(self, shipment_id, tracking_number,
-                 ship_from_zip_code,
+    def __init__(self, shipment_id,
+                 tracking_number=None,
+                 ship_from_zip_code=None,
                  shipment_date=None,
                  expected_delivery_date=None,
                  shipment_method='Other',
@@ -245,18 +364,27 @@ class Shipment(object):
     def to_dict(self):
         rv = {
             'alt_shipment_id': self.shipment_id,
-            'shipment_tracking_number': self.tracking_number,
-            'response_shipment_method': self.shipment_method,
-            'ship_from_zip_code': self.ship_from_zip_code,
-            'carrier': self.carrier,
             'shipment_items': self.items,
         }
+        if self.tracking_number:
+            rv['shipment_tracking_number'] = self.tracking_number
+        if self.shipment_method:
+            rv['response_shipment_method'] = self.shipment_method
+        if self.ship_from_zip_code:
+            rv['ship_from_zip_code'] = self.ship_from_zip_code
+        if self.carrier:
+            rv['carrier'] = self.carrier
         if self.shipment_date:
-            rv['response_shipment_date'] = self.shipment_date.isoformat()
+            rv['response_shipment_date'] = isoformat(self.shipment_date)
         if self.expected_delivery_date:
-            rv['expected_delivery_date'] = self.expected_delivery_date.isoformat()
+            rv['expected_delivery_date'] = isoformat(
+                self.expected_delivery_date
+            )
         if self.pick_up_date:
-            rv['carrier_pick_up_date'] = self.pick_up_date.isoformat()
+            rv['carrier_pick_up_date'] = isoformat(
+                self.pick_up_date
+            )
+        return rv
 
     def add_item(self, sku, quantity, cancel_quantity=None):
         """

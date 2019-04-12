@@ -95,3 +95,36 @@ Features
 
 * TODO
 
+
+Integration Approval API calls
+------------------------------
+
+.. code-block:: python
+
+
+    from jet import Jet
+    jet = Jet('XXX', 'XXX', 'XXXX')
+    jet.products.update_price('IPHONE-8', 79.99)
+
+    # Fulfillment node id prodived by approval workflow
+    jet.products.update_inventory('IPHONE-8', {'998bb45c821d4d5a84e73d68004f898b': 5})
+
+    # Get orders
+    order_ids = jet.orders.get_recent_order_ids('ready')
+
+    # Acknowledge an order
+    jet.orders.acknowledge(
+        '6b07db3d2e5643479242527332782dee',
+        {'a35bd1f8a8ab4481a0cccda6e2012e13': 'fulfillable'}
+    )
+
+    # Acknowledge order
+    jet.orders.acknowledge(
+        'e0d9e28d650d44daaa55f297847c0ab2',
+        order_items={'69585063be2a46ccb5dbf75823a3e7c1': 'fulfillable'}
+    )
+
+    # Cancelling an order
+    shipment = Shipment(shipment_id='CS1234')
+    shipment.add_item("RBE750-GOL", quantity=0, cancel_quantity=1)
+    jet.orders.ship('e0d9e28d650d44daaa55f297847c0ab2', [shipment])
