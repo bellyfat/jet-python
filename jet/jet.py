@@ -160,6 +160,18 @@ class Product(object):
             for url in urls
         ]
 
+    def all_skus(self):
+        """
+        Returns all of the skus by iterating over the pages
+        """
+        per_page = 100
+        for page in range(1, 1000):
+            skus = self.get_skus(page, per_page)
+            for sku in skus:
+                yield sku
+            if len(skus) < per_page:
+                break
+
     def create(self, sku, data):
         """
         Create a new product
