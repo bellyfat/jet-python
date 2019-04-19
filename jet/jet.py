@@ -7,6 +7,16 @@ from dateutil.parser import parse as parse_date
 
 UTC = pytz.timezone('UTC')
 
+__all__ = ['Jet', 'JetAuthenticationError', 'JetException']
+
+
+class JetException(Exception):
+    pass
+
+
+class JetAuthenticationError(JetException):
+    pass
+
 
 def isoformat(d):
     "Convert a date to datetime ISO format used by jet"
@@ -42,6 +52,10 @@ class Jet(object):
                 'pass': self.secret,
             }
         ).json()
+        if 'id_token' not in token_data:
+            raise JetAuthenticationError(". ".join(
+                token_data.get('errors', [])
+            ))
         self.token = token_data['id_token']
         self.token_expires_on = parse_date(
             token_data['expires_on']
