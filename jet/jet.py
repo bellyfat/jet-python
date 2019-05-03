@@ -87,6 +87,34 @@ class Jet(object):
     def returns(self):
         return Return(self)
 
+    @property
+    def fulfillment_nodes(self):
+        return FulfillmentNode(self)
+
+
+class FulfillmentNode(object):
+    def __init__(self, client):
+        self.client = client
+
+    def all(self):
+        urls = self.client.send_request(
+            'get',
+            '/fulfillment-nodes',
+        )['fulfillment_nodes']
+        return [
+            self.get_node(url.rsplit('/')[-1])
+            for url in urls
+        ]
+
+    def get_node(self, node_id):
+        """
+        Return a fulfillment node
+        """
+        return self.client.send_request(
+            'get',
+            '/fulfillment-nodes/' + node_id,
+        )
+
 
 class Product(object):
     """
