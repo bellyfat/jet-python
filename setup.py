@@ -23,7 +23,7 @@ history = open('HISTORY.rst').read().replace('.. :changelog:', '')
 
 setup(
     name='jet-python',
-    version='0.1',
+    version='0.2',
     description='Python Jet.com API Client',
     long_description=readme + '\n\n' + doclink + '\n\n' + history,
     author='Fulfil.IO Inc.',
